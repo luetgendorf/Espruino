@@ -397,6 +397,18 @@ NRF.setAdvertising([0x03,  // Length of Service List
     {interval:100});
 ```
 
+You can even specify an array of arrays, in which case each advertising packet
+will be iterated over in turn - for instance to make your device advertise
+both Eddystone and iBeacon:
+
+```
+NRF.setAdvertising([
+[0x03,0x03,0xAA,0xFE,0x13,0x16,0xAA,0xFE,0x10,0xF8,0x03,'g','o','o','.','g','l','/','C','H','o','J','H','0'],
+[....],
+[....],
+],{interval:500});
+```
+
 `options` is an object, which can contain:
 
 ```
@@ -461,8 +473,23 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
     return;
   }
 
-  if (jsvIsArray(data)) {
+  if (jsvIsArray(data) || jsvIsArrayBuffer(data)) {
     // raw data...
+    // Check if it's nested arrays - if so we alternate between advertising types
+    bleStatus &= ~(BLE_IS_ADVERTISING_MULTIPLE|BLE_ADVERTISING_MULTIPLE_MASK);
+    if (jsvIsArray(data)) {
+      JsVar *item = jsvGetArrayItem(data, 0);
+      if (jsvIsArray(item) || jsvIsArrayBuffer(item)) {
+        // nested - enable multiple advertising - start at index 0
+        bleStatus |= BLE_IS_ADVERTISING_MULTIPLE;
+        // start with the first element
+        jsvUnLock(data);
+        data = item;
+        item = 0;
+      } else
+        jsvUnLock(item);
+    }
+
     JSV_GET_AS_CHAR_ARRAY(dPtr, dLen, data);
     if (!dPtr) {
       jsExceptionHere(JSET_TYPEERROR, "Unable to convert data argument to an array");
@@ -511,6 +538,43 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
 /*JSON{
     "type" : "staticmethod",
     "class" : "NRF",
+    "name" : "setScanResponse",
+    "generate" : "jswrap_nrf_bluetooth_setScanResponse",
+    "params" : [
+      ["data","JsVar","The data to for the scan response"]
+    ]
+}
+
+The raw scan response data should be supplied as an array. For example to return "Sample" for the device name:
+
+```
+NRF.setScanResponse([0x07,  // Length of Data
+  0x09,  // Param: Complete Local Name
+  'S', 'a', 'm', 'p', 'l', 'e']);
+```
+*/
+void jswrap_nrf_bluetooth_setScanResponse(JsVar *data) {
+  uint32_t err_code;
+  
+  jsvObjectSetOrRemoveChild(execInfo.hiddenRoot, BLE_NAME_SCAN_RESPONSE_DATA, data);
+
+  if (jsvIsArray(data) || jsvIsArrayBuffer(data)) {
+    JSV_GET_AS_CHAR_ARRAY(dPtr, dLen, data);
+    if (!dPtr) {
+      jsExceptionHere(JSET_TYPEERROR, "Unable to convert data argument to an array");
+      return;
+    }
+
+    err_code = sd_ble_gap_adv_data_set(NULL, 0, (uint8_t *)dPtr, dLen);
+    jsble_check_error(err_code);
+  } else if (!jsvIsUndefined(data)) {
+    jsExceptionHere(JSET_TYPEERROR, "Expecting array-like object or undefined, got %t", data);
+  }
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "NRF",
     "name" : "setServices",
     "generate" : "jswrap_nrf_bluetooth_setServices",
     "params" : [
@@ -520,6 +584,9 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
 }
 
 Change the services and characteristics Espruino advertises.
+
+If you want to **change** the value of a characteristic, you need
+to use `NRF.updateServices()` instead
 
 To expose some information on Characteristic `ABCD` on service `BCDE` you could do:
 
@@ -862,7 +929,7 @@ void jswrap_nrf_bluetooth_setScan_cb(JsVar *callback, JsVar *adv) {
             }
           } else if (field_type == BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_MORE_AVAILABLE ||
                      field_type == BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE) {
-            JsVar *s = jsvVarPrintf("%04x", *(uint16_t*)&dPtr[i+2]);
+            JsVar *s = jsvVarPrintf("%04x", UNALIGNED_UINT16(&dPtr[i+2]));
             jsvArrayPushAndUnLock(services, s);
           } else if (field_type == BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE ||
                      field_type == BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_COMPLETE) {
@@ -1010,20 +1077,18 @@ void jswrap_nrf_bluetooth_findDevices(JsVar *callback, JsVar *timeout) {
 }
 
 Start/stop listening for RSSI values on the currently active connection
-
-RSSI is the 'Received Signal Strength Indication' in dBm
+(where This device is a peripheral and is being connected to by a 'central' device)
 
 ```
 // Start scanning
 NRF.setRSSIHandler(function(rssi) {
-  console.log(rssi);
+  console.log(rssi); // prints -85 (or similar)
 });
-// prints -85 (or similar)
-
 // Stop Scanning
 NRF.setRSSIHandler();
 ```
 
+RSSI is the 'Received Signal Strength Indication' in dBm
 */
 void jswrap_nrf_bluetooth_setRSSIHandler(JsVar *callback) {
   // set the callback event variable
@@ -1127,7 +1192,6 @@ void jswrap_nrf_nfcURL(JsVar *url) {
   uint32_t err_code;
   /* Turn off NFC */
   jsble_nfc_stop();
-
   JSV_GET_AS_CHAR_ARRAY(urlPtr, urlLen, url);
   if (!urlPtr || !urlLen)
     return jsExceptionHere(JSET_ERROR, "Unable to get URL data");
@@ -1166,6 +1230,56 @@ void jswrap_nrf_nfcURL(JsVar *url) {
 
   // start nfc properly
   jsble_nfc_start(flatStrPtr, len);
+#endif
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "NRF",
+    "name" : "nfcRaw",
+    "ifdef" : "NRF52",
+    "generate" : "jswrap_nrf_nfcRaw",
+    "params" : [
+      ["payload","JsVar","The NFC NDEF message to deliver to the reader"]
+    ]
+}
+Enables NFC and starts advertising with Raw data. For example:
+
+```
+NRF.nfcRaw(new Uint8Array([193, 1, 0, 0, 0, 13, 85, 3, 101, 115, 112, 114, 117, 105, 110, 111, 46, 99, 111, 109]));
+// same as NRF.nfcURL("http://espruino.com");
+```
+
+**Note:** This is only available on nRF52-based devices
+*/
+void jswrap_nrf_nfcRaw(JsVar *payload) {
+#ifdef USE_NFC
+  // Check for disabling NFC
+  if (jsvIsUndefined(payload)) {
+    jsvObjectRemoveChild(execInfo.hiddenRoot, "NFC");
+    jsble_nfc_stop();
+    return;
+  }
+
+  /* Turn off NFC */
+  jsble_nfc_stop();
+
+  JSV_GET_AS_CHAR_ARRAY(dataPtr, dataLen, payload);
+  if (!dataPtr || !dataLen)
+    return jsExceptionHere(JSET_ERROR, "Unable to get NFC data");
+
+  /* Create a flat string - we need this to store the NFC data so it hangs around.
+   * Avoid having a static var so we have RAM available if not using NFC */
+  JsVar *flatStr = jsvNewFlatStringOfLength(dataLen);
+  if (!flatStr)
+    return jsExceptionHere(JSET_ERROR, "Unable to create string with NFC data in");
+  jsvObjectSetChild(execInfo.hiddenRoot, "NFC", flatStr);
+  uint8_t *flatStrPtr = (uint8_t*)jsvGetFlatStringPointer(flatStr);
+  jsvUnLock(flatStr);
+  memcpy(flatStrPtr, dataPtr, dataLen);
+
+  // start nfc properly
+  jsble_nfc_start(flatStrPtr, dataLen);
 #endif
 }
 
@@ -1381,6 +1495,7 @@ JsVar *jswrap_nrf_bluetooth_requestDevice(JsVar *options) {
   return promise;
 #else
   jsExceptionHere(JSET_ERROR, "Unimplemented");
+  return 0;
 #endif
 }
 
@@ -1435,6 +1550,7 @@ JsVar *jswrap_nrf_bluetooth_connect(JsVar *mac) {
   return jswrap_nrf_BluetoothRemoteGATTServer_connect(gatt);
 #else
   jsExceptionHere(JSET_ERROR, "Unimplemented");
+  return 0;
 #endif
 }
 
@@ -1505,6 +1621,7 @@ JsVar *jswrap_nrf_BluetoothRemoteGATTServer_connect(JsVar *parent) {
   return 0;
 #else
   jsExceptionHere(JSET_ERROR, "Unimplemented");
+  return 0;
 #endif
 }
 
