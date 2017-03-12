@@ -20,6 +20,7 @@
 #include "jswrap_math.h" // for jswrap_math_mod
 #include "jswrap_object.h" // for jswrap_object_toString
 #include "jswrap_arraybuffer.h" // for jsvNewTypedArray
+#include "jswrap_dataview.h" // for jsvNewDataViewWithData
 
 #ifdef DEBUG
   /** When freeing, clear the references (nextChild/etc) in the JsVar.
@@ -1727,11 +1728,9 @@ JsVar *jsvAsNumber(JsVar *var) {
   return jsvNewFromFloat(jsvGetFloat(var));
 }
 
-#ifdef SAVE_ON_FLASH
 JsVarInt jsvGetIntegerAndUnLock(JsVar *v) { return _jsvGetIntegerAndUnLock(v); }
 JsVarFloat jsvGetFloatAndUnLock(JsVar *v) { return _jsvGetFloatAndUnLock(v); }
 bool jsvGetBoolAndUnLock(JsVar *v) { return _jsvGetBoolAndUnLock(v); }
-#endif
 
 /** Get the item at the given location in the array buffer and return the result */
 size_t jsvGetArrayBufferLength(const JsVar *arrayBuffer) {
@@ -3483,6 +3482,25 @@ JsVar *jsvNewTypedArray(JsVarDataArrayBufferViewType type, JsVarInt length) {
   jsvUnLock(lenVar);
   return array;
 }
+
+#ifndef SAVE_ON_FLASH
+JsVar *jsvNewDataViewWithData(JsVarInt length, unsigned char *data) {
+  JsVar *buf = jswrap_arraybuffer_constructor(length);
+  if (!buf) return 0;
+  JsVar *view = jswrap_dataview_constructor(buf, 0, 0);
+  if (!view) {
+    jsvUnLock(buf);
+    return 0;
+  }
+  if (data) {
+    JsVar *arrayBufferData = jsvGetArrayBufferBackingString(buf);
+    if (arrayBufferData)
+      jsvSetString(arrayBufferData, (char *)data, length);
+    jsvUnLock(arrayBufferData);
+  }
+  return view;
+}
+#endif
 
 JsVar *jsvNewArrayBufferWithPtr(unsigned int length, char **ptr) {
   assert(ptr);
