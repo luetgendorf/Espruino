@@ -28,7 +28,7 @@ info = {
 # 'bootloader' : 1,
  'binary_name' : 'espruino_%v_nrf52832.bin',
  'build' : {
-   'optimizeflags' : '-O3',
+   'optimizeflags' : '-Os',
    'libraries' : [
      'BLUETOOTH',
      'NET',
@@ -56,10 +56,10 @@ chip = {
   'adc' : 1,
   'dac' : 0,
   'saved_code' : {
-    'address' : ((120 - 3) * 4096), # Bootloader takes pages 120-127
+    'address' : ((118 - 3) * 4096), # Bootloader takes pages 120-127, FS takes 118-119
     'page_size' : 4096,
     'pages' : 3,
-    'flash_available' : 512 - ((31 + 8 + 3)*4) # Softdevice uses 31 pages of flash, bootloader 8, code 3. Each page is 4 kb.
+    'flash_available' : 512 - ((31 + 8 + 1 + 3)*4) # Softdevice uses 31 pages of flash, bootloader 8, FS 1, code 3. Each page is 4 kb.
   },
 };
 

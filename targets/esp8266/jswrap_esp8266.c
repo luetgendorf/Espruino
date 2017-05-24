@@ -227,7 +227,7 @@ JsVar *jswrap_ESP8266_getState() {
   uint32_t fid = spi_flash_get_id();
   uint32_t chip = (fid&0xff00)|((fid>>16)&0xff);
   char buff[16];
-  os_sprintf(buff, "0x%02lx 0x%04lx", fid & 0xff, chip);
+  os_sprintf(buff, "0x%02lx 0x%04lx", (long unsigned int) (fid & 0xff), (long unsigned int) chip);
   jsvObjectSetChildAndUnLock(esp8266State, "flashChip",   jsvNewFromString(buff));
 
   return esp8266State;
@@ -308,7 +308,10 @@ JsVar *jswrap_ESP8266_crc32(JsVar *jsData) {
    ["pin", "pin", "Pin for output signal."],
    ["arrayOfData", "JsVar", "Array of LED data."]
  ]
-}*/
+}
+
+**This function is deprecated.** Please use `require("neopixel").write(pin, data)` instead
+*/
 void jswrap_ESP8266_neopixelWrite(Pin pin, JsVar *jsArrayOfData) {
   jswrap_neopixel_write(pin, jsArrayOfData);
 }
@@ -320,22 +323,38 @@ void jswrap_ESP8266_neopixelWrite(Pin pin, JsVar *jsArrayOfData) {
   "name"     : "deepSleep",
   "generate" : "jswrap_ESP8266_deepSleep",
   "params"   : [
-    ["micros", "JsVar", "Number of microseconds to sleep."]
+    ["micros", "JsVar", "Number of microseconds to sleep."],
+    ["option", "JsVar", "posible values are 0, 1, 2 or 4"]
   ]
 }
-Put the ESP8266 into 'deep sleep' for the given number of microseconds,
-reducing power consumption drastically.
+Put the ESP8266 into 'deep sleep' for the given number of microseconds, 
+reducing power consumption drastically. 
 
-**Note:** unlike normal Espruino boards' 'deep sleep' mode, ESP8266
-deep sleep actually turns off the processor. After the given number of
-microseconds have elapsed, the ESP8266 will restart as if power had been
-turned off and then back on. *All contents of RAM will be lost*.
+meaning of option values:
+
+0 - the 108th Byte of init parameter decides whether RF calibration will be performed or not.
+
+1 - run RF calibration after waking up. Power consumption is high.
+
+2 - no RF calibration after waking up. Power consumption is low.
+
+4 - no RF after waking up. Power consumption is the lowest.
+
+**Note:** unlike normal Espruino boards' 'deep sleep' mode, ESP8266 deep sleep actually turns off the processor. After the given number of microseconds have elapsed, the ESP8266 will restart as if power had been turned off and then back on. *All contents of RAM will be lost*. 
+Connect GPIO 16 to RST to enable wakeup.
+
+**Special:** 0 microseconds cause sleep forever until external wakeup RST pull down occurs.
+
 */
-void   jswrap_ESP8266_deepSleep(JsVar *jsMicros) {
+void   jswrap_ESP8266_deepSleep(JsVar *jsMicros, JsVar *jsOption) {
   if (!jsvIsInt(jsMicros)) {
     jsExceptionHere(JSET_ERROR, "Invalid microseconds.");
     return;
   }
+  
+  uint8_t option = jsvGetInteger(jsOption);
+  system_deep_sleep_set_option(option);
+
   int sleepTime = jsvGetInteger(jsMicros);
   system_deep_sleep(sleepTime);
 }

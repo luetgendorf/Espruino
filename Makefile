@@ -132,9 +132,10 @@ ifeq ($(BOARD),)
  else ifeq ($(shell uname -n),arietta)
   BOARD=ARIETTA
  else
-  $(info *************************************************************)
-  $(info *           To build, use BOARD=my_board make               *)
-  $(info *************************************************************)
+  #$(info *************************************************************)
+  #$(info *           To build, use BOARD=my_board make               *)
+  #$(info *************************************************************)
+  BOARD=LINUX
  endif
 endif
 
@@ -312,8 +313,14 @@ SOURCES += \
 libs/filesystem/fat_sd/sdio_diskio.c \
 libs/filesystem/fat_sd/sdio_sdcard.c
 else #USE_FILESYSTEM_SDIO
+ifdef USE_FLASHFS
+DEFINES += -DUSE_FLASHFS
+SOURCES += \
+libs/filesystem/fat_sd/flash_diskio.c
+else
 SOURCES += \
 libs/filesystem/fat_sd/spi_diskio.c
+endif #USE_FLASHFS
 endif #USE_FILESYSTEM_SDIO
 endif #!LINUX
 endif #USE_FILESYSTEM
@@ -436,7 +443,9 @@ ifdef USE_NET
 
  ifdef USE_ESP32
  DEFINES += -DUSE_ESP32
- WRAPPERSOURCES += libs/network/esp32/jswrap_esp32_network.c \
+ WRAPPERSOURCES += \
+   libs/network/jswrap_wifi.c \
+   libs/network/esp32/jswrap_esp32_network.c \
    targets/esp32/jswrap_esp32.c
  INCLUDE += -I$(ROOT)/libs/network/esp32
  SOURCES +=  libs/network/esp32/network_esp32.c \
@@ -456,7 +465,9 @@ ifdef USE_NET
 
  ifdef USE_ESP8266
  DEFINES += -DUSE_ESP8266
- WRAPPERSOURCES += libs/network/esp8266/jswrap_esp8266_network.c \
+ WRAPPERSOURCES += \
+   libs/network/jswrap_wifi.c \
+   libs/network/esp8266/jswrap_esp8266_network.c \
    targets/esp8266/jswrap_esp8266.c \
    targets/esp8266/jswrap_nodemcu.c
  INCLUDE += -I$(ROOT)/libs/network/esp8266
@@ -504,6 +515,7 @@ INCLUDE += -I/usr/local/include -L/usr/local/lib
 endif
 
 ifdef USE_BLUETOOTH
+  DEFINES += -DBLUETOOTH
   INCLUDE += -I$(ROOT)/libs/bluetooth
   WRAPPERSOURCES += libs/bluetooth/jswrap_bluetooth.c
 endif

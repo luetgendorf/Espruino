@@ -27,12 +27,17 @@ mkdir $ZIPDIR
 # ESP8266
 export ESP8266_SDK_ROOT=$DIR/esp_iot_sdk_v2.0.0.p1
 export PATH=$PATH:$DIR/xtensa-lx106-elf/bin/
+# ESP32
+export ESP_IDF_PATH=$DIR/esp-idf
+export ESP_APP_TEMPLATE_PATH=$DIR/app
+export PATH=$PATH:$DIR/xtensa-esp32-elf/bin/
+
+
 
 echo ------------------------------------------------------
 echo                          Building Version $VERSION
 echo ------------------------------------------------------
-
-for BOARDNAME in PICO_1V3_CC3000 PICO_1V3_WIZ ESPRUINO_1V3 ESPRUINO_1V3_WIZ ESPRUINOWIFI PUCKJS NUCLEOF401RE NUCLEOF411RE STM32VLDISCOVERY STM32F3DISCOVERY STM32F4DISCOVERY OLIMEXINO_STM32 HYSTM32_24 HYSTM32_28 HYSTM32_32 RASPBERRYPI MICROBIT ESP8266_BOARD
+for BOARDNAME in PICO_1V3_CC3000 PICO_1V3_WIZ ESPRUINO_1V3 ESPRUINO_1V3_WIZ ESPRUINOWIFI PUCKJS NUCLEOF401RE NUCLEOF411RE STM32VLDISCOVERY STM32F3DISCOVERY STM32F4DISCOVERY OLIMEXINO_STM32 HYSTM32_24 HYSTM32_28 HYSTM32_32 RASPBERRYPI MICROBIT ESP8266_BOARD ESP8266_4MB RUUVITAG ESP32 
 do
   echo ------------------------------
   echo                  $BOARDNAME
@@ -65,6 +70,11 @@ do
     ESP_BINARY_NAME=`basename $ESP_BINARY_NAME .hex`.zip
     EXTRADEFS=DFU_UPDATE_BUILD=1
   fi
+  if [ "$BOARDNAME" == "RUUVITAG" ]; then
+    ESP_BINARY_NAME=`basename $ESP_BINARY_NAME .hex`.zip
+    EXTRADEFS=DFU_UPDATE_BUILD=1
+  fi
+
   echo "Building $ESP_BINARY_NAME"
   echo
   rm -f $BINARY_NAME
@@ -75,8 +85,8 @@ do
   elif [ "$BOARDNAME" == "ESPRUINOWIFI" ]; then
     bash -c "$EXTRADEFS scripts/create_espruinowifi_image.sh" || { echo "Build of $BOARDNAME failed" ; exit 1; }
   else
-    bash -c "$EXTRADEFS RELEASE=1 $BOARDNAME=1 make clean"
-    bash -c "$EXTRADEFS RELEASE=1 $BOARDNAME=1 make" || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    bash -c "$EXTRADEFS RELEASE=1 BOARD=$BOARDNAME make clean"
+    bash -c "$EXTRADEFS RELEASE=1 BOARD=$BOARDNAME make" || { echo "Build of $BOARDNAME failed" ; exit 1; }
   fi
   # rename binary if needed
   if [ -n "$EXTRANAME" ]; then
@@ -87,12 +97,20 @@ do
   # copy...
   if [ "$BOARDNAME" == "ESP8266_BOARD" ]; then
     tar -C $ZIPDIR -xzf ${ESP_BINARY_NAME}.tgz || { echo "Build of $BOARDNAME failed" ; exit 1; }
-    # Do some more ESP8266 build stuff
-    bash -c "$EXTRADEFS RELEASE=1 $BOARDNAME=1 make combined" || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    # build a combined image
+    bash -c "$EXTRADEFS RELEASE=1 BOARD=$BOARDNAME make combined" || { echo "Build of $BOARDNAME failed" ; exit 1; }
     cp ${ESP_BINARY_NAME}_combined_512.bin $ZIPDIR || { echo "Build of $BOARDNAME failed" ; exit 1; }
+  elif [ "$BOARDNAME" == "ESP8266_4MB" ]; then
+    tar -C $ZIPDIR -xzf ${ESP_BINARY_NAME}.tgz || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    # build a combined image
+    bash -c "$EXTRADEFS RELEASE=1 BOARD=$BOARDNAME make combined" || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    cp ${ESP_BINARY_NAME}_combined_4096.bin $ZIPDIR || { echo "Build of $BOARDNAME failed" ; exit 1; }
   else
     echo Copying ${ESP_BINARY_NAME} to $ZIPDIR/$NEW_BINARY_NAME
     cp ${ESP_BINARY_NAME} $ZIPDIR/$NEW_BINARY_NAME || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    if [ "$BOARDNAME" == "ESP32" ]; then
+      tar -C $ZIPDIR -xzf  `basename $ESP_BINARY_NAME .bin`.tgz || { echo "Build of $BOARDNAME failed" ; exit 1; }
+    fi
   fi
 done
 

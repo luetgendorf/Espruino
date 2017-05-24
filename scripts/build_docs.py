@@ -25,6 +25,7 @@ sys.path.append(".");
 import common
 import urllib2
 import markdown
+import htmlentitydefs
 
 # Scans files for comments of the form /*JSON......*/ and then writes out an HTML file describing
 # all the functions
@@ -140,6 +141,14 @@ def get_link(jsondata):
     s=s+"_global_"
   s=s+jsondata["name"]
   return s
+
+def html_escape(text):
+  escaped_chars = ""
+  for c in text:
+    if (ord(c) < 32) or (ord(c) > 126):
+      c = '&{};'.format(htmlentitydefs.codepoint2name[ord(c)])
+    escaped_chars = escaped_chars + c
+  return escaped_chars
 
 # If MDN doesn't 404 then include a link to it
 def insert_mdn_link(jsondata):
@@ -314,12 +323,10 @@ for jsondata in detail:
     desc = jsondata["description"]
     if not isinstance(desc, list): desc = [ desc ]
     if ("ifdef" in jsondata) or ("ifndef" in jsondata):
-      conds = ""
-      if "ifdef" in jsondata: conds = common.get_ifdef_description(jsondata["ifdef"])
+      if "ifdef" in jsondata: 
+        desc.append("\n\n**Note:** This is only available in "+common.get_ifdef_description(jsondata["ifdef"]));
       if "ifndef" in jsondata:
-        if conds!="": conds += " and "
-        conds = "not "+common.get_ifdef_description(jsondata["ifndef"])
-      desc.append("\n\n**Note:** This is only available in "+conds);
+        desc.append("\n\n**Note:** This is not available in "+common.get_ifdef_description(jsondata["ifndef"]));      
     html_description(desc, jsondata["name"])
   if "params" in jsondata:
     html("  <h4>Parameters</h4>")
@@ -344,7 +351,7 @@ for jsondata in detail:
     html("  <p class=\"examples\">This function is used in the following places in Espruino's documentation</p>")
     html("  <ul class=\"examples\">")
     for link in uses:
-      html('    <li><a href="'+link["url"]+'">'+link["title"]+'</a></li>')
+      html('    <li><a href="'+link["url"]+'">'+html_escape(link["title"])+'</a></li>')
     html("  </ul>")
 
 html(" </body>")

@@ -373,7 +373,10 @@ void jswrap_nrf_bluetooth_restart() {
     "generate" : "jswrap_nrf_bluetooth_getAddress",
     "return" : ["JsVar", "MAC address - a string of the form 'aa:bb:cc:dd:ee:ff'" ]
 }
-Get this device's Bluetooth MAC address
+Get this device's Bluetooth MAC address.
+
+For Puck.js, the last 5 characters of this (eg. `ee:ff`)
+are used in the device's advertised Bluetooth name.
 */
 JsVar *jswrap_nrf_bluetooth_getAddress() {
   uint32_t addr0 =  NRF_FICR->DEVICEADDR[0];
@@ -394,7 +397,10 @@ JsVar *jswrap_nrf_bluetooth_getAddress() {
     "generate" : "jswrap_nrf_bluetooth_getBattery",
     "return" : ["float", "Battery level in volts" ]
 }
-Get the battery level in volts
+Get the battery level in volts (the voltage that the NRF chip is running off of).
+
+This is the battery level of the device itself - it has nothing to with any
+device that might be connected.
 */
 JsVarFloat jswrap_nrf_bluetooth_getBattery() {
   return jshReadVRef();
@@ -470,6 +476,7 @@ NRF.setAdvertising([
   name: "Hello" // The name of the device
   showName: true/false // include full name, or nothing
   discoverable: true/false // general discoverable, or limited - default is limited
+  connectable: true/false // whether device is connectable - default is true
   interval: 600 // Advertising interval in msec, between 20 and 10000
 }
 ```
@@ -508,6 +515,13 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
       }
     }
 
+    v = jsvObjectGetChild(options, "connectable", 0);
+    if (v) {
+      if (jsvGetBoolAndUnLock(v)) bleStatus &= ~BLE_IS_NOT_CONNECTABLE;
+      else bleStatus |= BLE_IS_NOT_CONNECTABLE;
+      bleChanged = true;
+    }
+
     v = jsvObjectGetChild(options, "name", 0);
     if (v) {
       JSV_GET_AS_CHAR_ARRAY(namePtr, nameLen, v);
@@ -531,17 +545,16 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
     // raw data...
     // Check if it's nested arrays - if so we alternate between advertising types
     bleStatus &= ~(BLE_IS_ADVERTISING_MULTIPLE|BLE_ADVERTISING_MULTIPLE_MASK);
+    JsVar *item = 0;
     if (jsvIsArray(data)) {
-      JsVar *item = jsvGetArrayItem(data, 0);
+      item = jsvGetArrayItem(data, 0);
       if (jsvIsArray(item) || jsvIsArrayBuffer(item)) {
         // nested - enable multiple advertising - start at index 0
         bleStatus |= BLE_IS_ADVERTISING_MULTIPLE;
         // start with the first element
-        jsvUnLock(data);
         data = item;
         item = 0;
-      } else
-        jsvUnLock(item);
+      }
     }
 
     JSV_GET_AS_CHAR_ARRAY(dPtr, dLen, data);
@@ -556,7 +569,8 @@ void jswrap_nrf_bluetooth_setAdvertising(JsVar *data, JsVar *options) {
     jsble_check_error(err_code);
     if (bleChanged && isAdvertising)
       jsble_advertising_start();
-    return; // we're done here now
+    jsvUnLock(item);
+    return; // we're done here now - don't mess with advertising any more
   } else if (jsvIsObject(data)) {
     ble_advdata_service_data_t *service_data = (ble_advdata_service_data_t*)alloca(jsvGetChildren(data)*sizeof(ble_advdata_service_data_t));
     int n = 0;
@@ -685,6 +699,7 @@ NRF.setServices({
       writable : true,   // optional, default is false
       notify : true,   // optional, default is false
       indicate : true,   // optional, default is false
+      description: "My Characteristic",  // optional, default is null
       onWrite : function(evt) { // optional
         console.log("Got ", evt.data);
       }
@@ -698,22 +713,45 @@ NRF.setServices({
 **Note:** UUIDs can be integers between `0` and `0xFFFF`, strings of
 the form `"ABCD"`, or strings of the form `"ABCDABCD-ABCD-ABCD-ABCD-ABCDABCDABCD"`
 
-**Note:** Currently, services/characteristics can't be removed once added.
-As a result, calling setServices multiple times will cause characteristics
-to either be updated (value only) or ignored.
-
 `options` can be of the form:
 
 ```
 NRF.setServices(undefined, {
   hid : new Uint8Array(...), // optional, default is undefined. Enable BLE HID support
   uart : true, // optional, default is true. Enable BLE UART support
+  advertise: [ '180D' ] // optional, list of service UUIDs to advertise
 });
 ```
 
 To enable BLE HID, you must set `hid` to an array which is the BLE report
 descriptor. The easiest way to do this is to use the `ble_hid_controls`
 or `ble_hid_keyboard` modules.
+
+**Note:** Just creating a service doesn't mean that the service will
+be advertised. It will only be available after a device connects. To
+advertise, specify the UUIDs you wish to advertise in the `advertise`
+field of the second `options` argument. For example this will create
+and advertise a heart rate service:
+
+```
+NRF.setServices({
+  0x180D: { // heart_rate
+    0x2A37: { // heart_rate_measurement
+      notify: true,
+      value : [0x06, heartrate],
+    }
+  }
+}, { advertise: [ '180D' ] });
+```
+
+You may specify 128 bit UUIDs to advertise, however you may get a `DATA_SIZE`
+exception because there is insufficient space in the Bluetooth LE advertising
+packet for the 128 bit UART UUID as well as the UUID you specified. In this
+case you can add `uart:false` after the `advertise` element to disable the
+UART, however you then be unable to connect to Puck.js's console via Bluetooth.
+
+If you absolutely require two or more 128 bit UUIDs then you will have to
+specify your own raw advertising data packets with `NRF.setAdvertising`
 
 */
 void jswrap_nrf_bluetooth_setServices(JsVar *data, JsVar *options) {
@@ -726,12 +764,14 @@ void jswrap_nrf_bluetooth_setServices(JsVar *data, JsVar *options) {
   JsVar *use_hid = 0;
 #endif
   bool use_uart = true;
+  JsVar *advertise = 0;
 
   jsvConfigObject configs[] = {
 #if BLE_HIDS_ENABLED
       {"hid", JSV_ARRAY, &use_hid},
 #endif
-      {"uart", JSV_BOOLEAN, &use_uart}
+      {"uart", JSV_BOOLEAN, &use_uart},
+      {"advertise",  JSV_ARRAY, &advertise},
   };
   if (!jsvReadConfigObject(options, configs, sizeof(configs) / sizeof(jsvConfigObject))) {
     return;
@@ -763,6 +803,10 @@ void jswrap_nrf_bluetooth_setServices(JsVar *data, JsVar *options) {
 
   // Save the current service data
   jsvObjectSetOrRemoveChild(execInfo.hiddenRoot, BLE_NAME_SERVICE_DATA, data);
+  // Service UUIDs to advertise
+  if (advertise) bleStatus|=BLE_NEEDS_SOFTDEVICE_RESTART;
+  jsvObjectSetOrRemoveChild(execInfo.hiddenRoot, BLE_NAME_SERVICE_ADVERTISE, advertise);
+  jsvUnLock(advertise);
 
   // work out whether to apply changes
   if (bleStatus & (BLE_SERVICES_WERE_SET|BLE_NEEDS_SOFTDEVICE_RESTART)) {
@@ -983,8 +1027,10 @@ void jswrap_nrf_bluetooth_setScan_cb(JsVar *callback, JsVar *adv) {
             }
           } else if (field_type == BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_MORE_AVAILABLE ||
                      field_type == BLE_GAP_AD_TYPE_16BIT_SERVICE_UUID_COMPLETE) {
-            JsVar *s = jsvVarPrintf("%04x", UNALIGNED_UINT16(&dPtr[i+2]));
-            jsvArrayPushAndUnLock(services, s);
+            for (int svc_idx = 2; svc_idx < field_length + 1; svc_idx += 2) {
+              JsVar *s = jsvVarPrintf("%04x", UNALIGNED_UINT16(&dPtr[i+svc_idx]));
+              jsvArrayPushAndUnLock(services, s);
+            }
           } else if (field_type == BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_MORE_AVAILABLE ||
                      field_type == BLE_GAP_AD_TYPE_128BIT_SERVICE_UUID_COMPLETE) {
             JsVar *s = bleUUID128ToStr((uint8_t*)&dPtr[i+2]);
@@ -1445,19 +1491,19 @@ JsVar *jswrap_nrf_bluetooth_requestDevice_filter_device(JsVar *filter, JsVar *de
     while (jsvObjectIteratorHasValue(&it)) {
       bool foundService = false;
       JsVar *uservice = jsvObjectIteratorGetValue(&it);
-      JsVar *service = jswrap_string_toUpperLowerCase(uservice, false);
-      jsvUnLock(uservice);
+      ble_uuid_t userviceUuid;
+      bleVarToUUIDAndUnLock(&userviceUuid, uservice);
       JsvObjectIterator dit;
       jsvObjectIteratorNew(&dit, deviceServices);
       while (jsvObjectIteratorHasValue(&dit)) {
         JsVar *deviceService = jsvObjectIteratorGetValue(&dit);
-        if (jsvIsEqual(service, deviceService))
+        ble_uuid_t deviceServiceUuid;
+        bleVarToUUIDAndUnLock(&deviceServiceUuid, deviceService);
+        if (bleUUIDEqual(userviceUuid, deviceServiceUuid))
           foundService = true;
-        jsvUnLock(deviceService);
         jsvObjectIteratorNext(&dit);
       }
       jsvObjectIteratorFree(&dit);
-      jsvUnLock(service);
       if (!foundService) matches = false;
       jsvObjectIteratorNext(&it);
     }
@@ -1721,6 +1767,56 @@ void jswrap_BluetoothRemoteGATTServer_disconnect(JsVar *parent) {
 }
 
 /*JSON{
+    "type" : "method",
+    "class" : "BluetoothRemoteGATTServer",
+    "name" : "startBonding",
+    "ifdef" : "NRF52",
+    "generate" : "jswrap_nrf_BluetoothRemoteGATTServer_startBonding",
+    "params" : [
+      ["forceRePair","bool","If the device is already bonded, re-pair it"]
+    ],
+    "return" : ["JsVar", "A Promise that is resolved (or rejected) when the bonding is complete" ]
+}
+Start negotiating bonding (secure communications) with the connected device,
+and return a Promise that is completed on success or failure.
+
+```
+var gatt;
+NRF.requestDevice({ filters: [{ name: 'Puck.js abcd' }] }).then(function(device) {
+  console.log("found device");
+  return device.gatt.connect();
+}).then(function(g) {
+  gatt = g;
+  console.log("connected");
+  return gatt.startBonding();
+}).then(function() {
+  console.log("bonded");
+  gatt.disconnect();
+}).catch(function(e) {
+  console.log("ERROR",e);
+});
+```
+
+**This is not part of the Web Bluetooth Specification.** It has been added
+specifically for Puck.js.
+
+**Note:** This is only available on some devices
+*/
+JsVar *jswrap_nrf_BluetoothRemoteGATTServer_startBonding(JsVar *parent, bool forceRePair) {
+#if CENTRAL_LINK_COUNT>0
+  if (bleNewTask(BLETASK_BONDING, parent/*BluetoothRemoteGATTServer*/)) {
+    JsVar *promise = jsvLockAgainSafe(blePromise);
+    jsble_central_startBonding(forceRePair);
+    return promise;
+  }
+  return 0;
+#else
+  jsExceptionHere(JSET_ERROR, "Unimplemented");
+  return 0;
+#endif
+}
+
+/*JSON{
   "type" : "method",
   "class" : "BluetoothRemoteGATTServer",
   "name" : "getPrimaryService",
@@ -1773,6 +1869,46 @@ JsVar *jswrap_BluetoothRemoteGATTServer_getPrimaryServices(JsVar *parent) {
   JsVar *promise = jsvLockAgainSafe(blePromise);
   jsble_central_getPrimaryServices(uuid);
   return promise;
+#else
+  jsExceptionHere(JSET_ERROR, "Unimplemented");
+  return 0;
+#endif
+}
+
+/*JSON{
+  "type" : "method",
+  "class" : "BluetoothRemoteGATTServer",
+  "name" : "setRSSIHandler",
+  "generate" : "jswrap_BluetoothRemoteGATTServer_setRSSIHandler",
+  "params" : [
+    ["callback","JsVar","The callback to call with the RSSI value, or undefined to stop"]
+  ],
+  "ifdef" : "NRF52"
+}
+
+Start/stop listening for RSSI values on the active GATT connection
+
+```
+// Start listening for RSSI value updates
+gattServer.setRSSIHandler(function(rssi) {
+  console.log(rssi); // prints -85 (or similar)
+});
+// Stop listening
+gattServer.setRSSIHandler();
+```
+
+RSSI is the 'Received Signal Strength Indication' in dBm
+
+**Note:** This is only available on some devices
+*/
+void jswrap_BluetoothRemoteGATTServer_setRSSIHandler(JsVar *parent, JsVar *callback) {
+#if CENTRAL_LINK_COUNT>0
+  // set the callback event variable
+  if (!jsvIsFunction(callback)) callback=0;
+  jsvObjectSetChild(parent, BLE_RSSI_EVENT, callback);
+  // either start or stop scanning
+  uint32_t err_code = jsble_set_central_rssi_scan(callback != 0);
+  jsble_check_error(err_code);
 #else
   jsExceptionHere(JSET_ERROR, "Unimplemented");
   return 0;

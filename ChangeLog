@@ -1,3 +1,18 @@
+     1v93 : Ensure that specifying too many advertising UUIDs causes an exception, not a reboot
+            nRF5x: Fix for time jump caused by reentrancy in jshGetSystemTime
+            Fix regression causing multiple end/close callbacks when using standard TCP/IP socket client/server
+            Ensure NetworkJS reports receive errors back correctly
+            nRF5x: Fix issue where connect and immediate disconnect could in some cases trigger an error from nordic's libraries that'd cause a reboot
+            Fix regression that caused Original Espruino to have lost Filesystem/hashlib/neopixel support in 1v92
+	    Re-add TV output to Original Espruino
+            Fix some stack overflow bugs on Linux found by fuzzing (#1147)
+            Remove un-needed code for parsing '.' in var statement (#1147)
+            Add autocomplete for pin names (fix #1124)
+            Add Array.indexOf fromIndex support (fix #162)
+            Puck.js: Add BluetoothRemoteGATTServer.startBonding to allow bonding to be initiated when Puck.js is a central
+            Fat FS: closedir after readdir, FS errors should be catchable (#1164), fs.statSync (#1163)
+            Allow hardware (CTS) flow control (fix #1165)
+
      1v92 : nRF5x: Fix issue where Espruino could crash during save() if the flash got into a strange state
             Added Pin.toggle() function
             Fix implicit casting to bool/number on ArrayBuffers (fix #1030)
@@ -22,12 +37,30 @@
             nRF52: Change connection params for central mode so NRF.setLowPowerConnection affects connection speed
             Un-inlining jsvGet*AndUnLock functions to give us a little more free flash
 	    ESP8266: RELEASE=1 sets WIFI_DBG and NET_DBG to 0 to shrink firmware size
-	    ESP8266: Add Wifi.setAPIP() and Wifi.setIP() 
-	    ESP8266: Add i2c clock stretch
+	    ESP8266: Add Wifi.setAPIP() and Wifi.setIP
+	    ESP8266: Add i2c clock stretch (#1097)
 	    Fix E.FFT output (enable magnitude when one array specified)
             Puck.js: Correct reading if using analogWrite to red LED and *then* using Puck.light()
             Improved build process for all boards
-            ESP8266: now build in graphics lib
+            Pin.toggle now returns a boolean (fix #1111)
+            nRF52: Now use 'high drive' mode for GPIOs
+            Puck.js: tweak IR duty cycle, with high drive GPIO range is ~3x more
+            nRF52: switch compilation to size optimisation, not speed
+            nRF5x: Allow services to be advertised (fix #996)
+            JSON.parse now throws an exception if an incorrect value type is found (fix #1117)
+            Pipe close event handlers now use 'this' arg - solves auto-closing pipe when piping from HTTP
+            nRF5x: stop app_timer NRF_ERROR_INVALID_PARAM errors (trying to sleep for too little time)
+            Added flash emulation to Linux port
+            Increase max graphics size from 1023 to 32767
+	    Add Fat File System to boards with large Flash (ESP32)
+            nRF52: Don't get stuck in 'HID Busy' state if a HID send failed
+            Change name of socket close internal variable so it doesn't conflict with Pipe's close call
+            Stop pipe from causing errors if fields of the requested names exist but aren't functions
+            nRF52: Fix upgrade from older firmwares if saved code is in flash, reduce virtual pages to 2
+            Fix segfault detected by fuzzing (#1133)
+            Fix File.read so that end of file triggers pipe.end event
+            ESP8266: Add BOARD ESP8266_4M with 1600 vars, 64K save area and GRAPHICS (#1110)
+            ESP8266: Add ESP8266.deepSleep(micros, option) (#1102)
 
      1v91 : Fix recent regression if no Boot Code defined at startup
             Fix handling of return of rejected promise within a promise
